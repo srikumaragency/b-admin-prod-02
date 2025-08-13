@@ -31,9 +31,9 @@ const productSchema = new mongoose.Schema({
   // 4. Customer sees: ~~calculatedOriginalPrice~~ **profitMarginPrice** (discountPercentage% OFF!)
   // 5. Customer pays: profitMarginPrice (which becomes offerPrice)
   //
-  // Example: basePrice=100, profitMargin=65%, discount=81%
-  // → profitMarginPrice=165, calculatedOriginalPrice=868.42, offerPrice=165
-  // → Customer sees: ~~₹868.42~~ **₹165** (81% OFF!)
+  // Example: basePrice=100, profitMargin=70%, discount=80%
+  // → profitMarginPrice=170, calculatedOriginalPrice=850, offerPrice=170
+  // → Customer sees: ~~₹850~~ **₹170** (80% OFF!)
   
   basePrice: {
     type: Number,
@@ -48,7 +48,7 @@ const productSchema = new mongoose.Schema({
   },
   profitMarginPercentage: {
     type: Number,
-    default: 65, // Default 65% profit margin
+    default: 70, // Default 70% profit margin
     min: 0,
     validate: {
       validator: function(v) {
@@ -70,7 +70,7 @@ const productSchema = new mongoose.Schema({
   },
   discountPercentage: {
     type: Number,
-    default: 81, // Default 81% discount
+    default: 80, // Default 80% discount
     min: 0,
     max: 99.99,
     validate: {
@@ -285,14 +285,17 @@ productSchema.pre('save', function(next) {
   next();
 });
 
+// Helper function for consistent rounding to 2 decimal places
+const round2 = (num) => parseFloat(Number(num).toFixed(2));
+
 // Static method to calculate pricing and inventory
-productSchema.statics.calculatePricing = function(basePrice, profitMarginPercentage = 65, discountPercentage = 81) {
-  const profitMarginPrice = basePrice + (basePrice * (profitMarginPercentage / 100));
-  const calculatedOriginalPrice = profitMarginPrice / (1 - (discountPercentage / 100));
+productSchema.statics.calculatePricing = function(basePrice, profitMarginPercentage = 70, discountPercentage = 80) {
+  const profitMarginPrice = round2(basePrice + (basePrice * (profitMarginPercentage / 100)));
+  const calculatedOriginalPrice = round2(profitMarginPrice / (1 - (discountPercentage / 100)));
   const offerPrice = profitMarginPrice;
   
   return {
-    basePrice,
+    basePrice: round2(basePrice),
     profitMarginPercentage,
     profitMarginPrice,
     discountPercentage,
@@ -321,9 +324,9 @@ productSchema.methods.updatePricing = function(newBasePrice, newProfitMarginPerc
   this.profitMarginPercentage = newProfitMarginPercentage || this.profitMarginPercentage;
   this.discountPercentage = newDiscountPercentage || this.discountPercentage;
   
-  // Recalculate all prices
-  this.profitMarginPrice = this.basePrice + (this.basePrice * (this.profitMarginPercentage / 100));
-  this.calculatedOriginalPrice = this.profitMarginPrice / (1 - (this.discountPercentage / 100));
+  // Recalculate all prices with consistent rounding
+  this.profitMarginPrice = round2(this.basePrice + (this.basePrice * (this.profitMarginPercentage / 100)));
+  this.calculatedOriginalPrice = round2(this.profitMarginPrice / (1 - (this.discountPercentage / 100)));
   this.offerPrice = this.profitMarginPrice;
   this.price = this.calculatedOriginalPrice; // Legacy field
   

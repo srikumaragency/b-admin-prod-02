@@ -504,7 +504,7 @@ const generateProfessionalInvoicePDF = (invoiceData) => {
         const actualAmount = quantity * rate;
         
         // Discount percentage from database  
-        const discountPercent = parseFloat(item.discountPercentage || item.productSnapshot?.discountPercentage || item.productId?.discountPercentage || 81);
+        const discountPercent = parseFloat(item.discountPercentage || item.productSnapshot?.discountPercentage || item.productId?.discountPercentage || 80);
         
         // Discount value = (Actual × Discount%) / 100
         const discountAmount = (actualAmount * discountPercent) / 100;

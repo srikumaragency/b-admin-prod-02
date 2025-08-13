@@ -39,15 +39,15 @@ const swaggerJsDoc = {
           },
           profitMarginPercentage: { 
             type: "number", 
-            default: 65,
-            description: "Profit margin percentage (default: 65%)",
-            example: 65
+            default: 70,
+            description: "Profit margin percentage (default: 70%)",
+            example: 70
           },
           discountPercentage: { 
             type: "number", 
-            default: 81,
-            description: "Display discount percentage (default: 81%)",
-            example: 81
+            default: 80,
+            description: "Display discount percentage (default: 80%)",
+            example: 80
           },
           // Legacy fields (auto-calculated)
           price: { type: "number", description: "Calculated original price for display" },
@@ -380,15 +380,15 @@ const swaggerJsDoc = {
                   },
                   profitMarginPercentage: { 
                     type: "number", 
-                    default: 65,
-                    description: "Profit margin percentage (default: 65%)",
-                    example: 65
+                    default: 70,
+                    description: "Profit margin percentage (default: 70%)",
+                    example: 70
                   },
                   discountPercentage: { 
                     type: "number", 
-                    default: 81,
-                    description: "Display discount percentage (default: 81%)",
-                    example: 81
+                    default: 80,
+                    description: "Display discount percentage (default: 80%)",
+                    example: 80
                   },
                   // Legacy fields (optional, will be calculated)
                   price: { type: "number", description: "Legacy price field (auto-calculated)" },
@@ -472,12 +472,12 @@ const swaggerJsDoc = {
                     name: "LAXMI",
                     description: "BEST PRODUCT",
                     basePrice: 100,
-                    profitMarginPercentage: 65,
-                    profitMarginPrice: 165,
-                    discountPercentage: 81,
-                    calculatedOriginalPrice: 868.4210526315792,
-                    offerPrice: 165,
-                    price: 868.4210526315792,
+                    profitMarginPercentage: 70,
+                    profitMarginPrice: 170,
+                    discountPercentage: 80,
+                    calculatedOriginalPrice: 850,
+                    offerPrice: 170,
+                    price: 850,
                     categoryId: {
                       _id: "6876929e01f4d000003e1a45",
                       name: "NIGHT LIGHTS"

@@ -1,6 +1,9 @@
 const Product = require('../models/Product');
 const cloudinary = require('../config/cloudinary');
 
+// Helper function for consistent rounding to 2 decimal places
+const round2 = (num) => parseFloat(Number(num).toFixed(2));
+
 // Create product
 exports.createProduct = async (req, res) => {
   try {
@@ -11,7 +14,8 @@ exports.createProduct = async (req, res) => {
     const {
       productCode, name, description, 
       // New pricing fields
-      basePrice, profitMarginPercentage = 65, discountPercentage = 81,
+      basePrice, profitMarginPercentage = 70, discountPercentage = 80,
+      profitMarginPrice, calculatedOriginalPrice, // Add these to extract from request
       // Legacy fields for backward compatibility
       price, offerPrice, 
       categoryId, subcategoryId, inStock = true, bestSeller = false, featured = false, tags,
@@ -41,34 +45,84 @@ exports.createProduct = async (req, res) => {
       return res.status(400).json({ message: 'Subcategory is required' });
     }
 
-    // Validate pricing fields
-    if (!basePrice && !price) {
-      return res.status(400).json({ message: 'Base price is required' });
+    // Validate pricing fields - require either basePrice/price OR profitMarginPrice
+    if (!basePrice && !price && !profitMarginPrice) {
+      return res.status(400).json({ message: 'Either base price or profit margin price is required' });
     }
 
-    // Calculate pricing using the new system
-    const finalBasePrice = parseFloat(basePrice || price); // Convert to number and use basePrice if provided, otherwise fall back to legacy price
+    // Calculate pricing - preserve exact profitMarginPrice if provided
+    let pricingDetails;
     
-    // Validate that finalBasePrice is a valid number
-    if (isNaN(finalBasePrice) || finalBasePrice <= 0) {
-      return res.status(400).json({ message: 'Base price must be a valid positive number' });
-    }
+    // Check if exact profitMarginPrice is provided (user typed it directly)
+    const userProfitMarginPrice = profitMarginPrice ? parseFloat(profitMarginPrice) : null;
+    const userCalculatedOriginalPrice = calculatedOriginalPrice ? parseFloat(calculatedOriginalPrice) : null;
     
-    // Ensure all pricing parameters are numbers
-    const finalProfitMarginPercentage = parseFloat(profitMarginPercentage) || 65;
-    const finalDiscountPercentage = parseFloat(discountPercentage) || 81;
-    
-    const pricingDetails = Product.calculatePricing(
-      finalBasePrice,
-      finalProfitMarginPercentage,
-      finalDiscountPercentage
-    );
+    if (userProfitMarginPrice && userProfitMarginPrice > 0) {
+      // Use exact profitMarginPrice as provided by user
+      const finalProfitMarginPercentage = parseFloat(profitMarginPercentage) || 70;
+      const finalDiscountPercentage = parseFloat(discountPercentage) || 80;
+      
+      // Calculate or use provided basePrice
+      let finalBasePrice;
+      if (basePrice && parseFloat(basePrice) > 0) {
+        finalBasePrice = parseFloat(basePrice);
+      } else {
+        // Calculate basePrice from profitMarginPrice and percentage
+        finalBasePrice = round2(userProfitMarginPrice / (1 + finalProfitMarginPercentage / 100));
+      }
+      
+      // Use exact profitMarginPrice and calculate other fields
+      const finalCalculatedOriginalPrice = userCalculatedOriginalPrice || 
+        round2(userProfitMarginPrice / (1 - finalDiscountPercentage / 100));
+      
+      pricingDetails = {
+        basePrice: finalBasePrice,
+        profitMarginPercentage: finalProfitMarginPercentage,
+        profitMarginPrice: round2(userProfitMarginPrice),
+        discountPercentage: finalDiscountPercentage,
+        calculatedOriginalPrice: finalCalculatedOriginalPrice,
+        offerPrice: round2(userProfitMarginPrice),
+        price: finalCalculatedOriginalPrice // Legacy field
+      };
+      
+      console.log('💰 Creating product with EXACT profitMarginPrice:', {
+        userProvidedPrice: userProfitMarginPrice,
+        finalPrice: pricingDetails.profitMarginPrice,
+        basePrice: finalBasePrice,
+        profitMarginPercentage: finalProfitMarginPercentage,
+        discountPercentage: finalDiscountPercentage
+      });
+    } else {
+      // Fallback to calculated pricing from basePrice
+      const finalBasePrice = parseFloat(basePrice || price);
+      
+      // Validate that finalBasePrice is a valid number
+      if (isNaN(finalBasePrice) || finalBasePrice <= 0) {
+        return res.status(400).json({ message: 'Base price must be a valid positive number' });
+      }
+      
+      // Ensure all pricing parameters are numbers
+      const finalProfitMarginPercentage = parseFloat(profitMarginPercentage) || 70;
+      const finalDiscountPercentage = parseFloat(discountPercentage) || 80;
+      
+      pricingDetails = Product.calculatePricing(
+        finalBasePrice,
+        finalProfitMarginPercentage,
+        finalDiscountPercentage
+      );
+      
+      // Apply consistent rounding
+      pricingDetails.profitMarginPrice = round2(pricingDetails.profitMarginPrice);
+      pricingDetails.calculatedOriginalPrice = round2(pricingDetails.calculatedOriginalPrice);
+      pricingDetails.offerPrice = round2(pricingDetails.offerPrice);
+      pricingDetails.price = round2(pricingDetails.price);
 
-    console.log('💰 Creating product with pricing:', {
-      basePrice: finalBasePrice,
-      profitMarginPercentage: finalProfitMarginPercentage,
-      discountPercentage: finalDiscountPercentage
-    });
+      console.log('💰 Creating product with calculated pricing:', {
+        basePrice: finalBasePrice,
+        profitMarginPercentage: finalProfitMarginPercentage,
+        discountPercentage: finalDiscountPercentage
+      });
+    }
 
     // Check if product code already exists
     const existingProduct = await Product.findOne({ productCode: productCode.toUpperCase() });
@@ -371,6 +425,7 @@ exports.updateProduct = async (req, res) => {
       productCode, name, description, 
       // New pricing fields
       basePrice, profitMarginPercentage, discountPercentage,
+      profitMarginPrice, calculatedOriginalPrice, // Add these to extract from request
       // Legacy fields for backward compatibility
       price, offerPrice, 
       categoryId, subcategoryId, inStock, bestSeller, featured, tags, stockQuantity, youtubeLink,
@@ -524,14 +579,60 @@ exports.updateProduct = async (req, res) => {
     product.youtubeLink = youtubeLink !== undefined ? youtubeLink : product.youtubeLink;
     product.isActive = isActive !== undefined ? isActive : product.isActive;
     
-    // Update pricing fields if provided
-    if (basePrice !== undefined) {
+    // Update pricing fields - preserve exact profitMarginPrice if provided
+    const userProfitMarginPrice = profitMarginPrice ? parseFloat(profitMarginPrice) : null;
+    const userCalculatedOriginalPrice = calculatedOriginalPrice ? parseFloat(calculatedOriginalPrice) : null;
+    
+    if (userProfitMarginPrice && userProfitMarginPrice > 0) {
+      // Use exact profitMarginPrice as provided by user
+      const finalProfitMarginPercentage = parseFloat(profitMarginPercentage) || product.profitMarginPercentage;
+      const finalDiscountPercentage = parseFloat(discountPercentage) || product.discountPercentage;
+      
+      // Calculate or use provided basePrice
+      let finalBasePrice;
+      if (basePrice && parseFloat(basePrice) > 0) {
+        finalBasePrice = parseFloat(basePrice);
+      } else {
+        // Calculate basePrice from profitMarginPrice and percentage
+        finalBasePrice = round2(userProfitMarginPrice / (1 + finalProfitMarginPercentage / 100));
+      }
+      
+      // Update with exact values - DO NOT use updatePricing as it recalculates
+      product.basePrice = finalBasePrice;
+      product.profitMarginPercentage = finalProfitMarginPercentage;
+      product.profitMarginPrice = round2(userProfitMarginPrice);
+      product.discountPercentage = finalDiscountPercentage;
+      product.calculatedOriginalPrice = userCalculatedOriginalPrice || 
+        round2(userProfitMarginPrice / (1 - finalDiscountPercentage / 100));
+      product.offerPrice = round2(userProfitMarginPrice);
+      product.price = product.calculatedOriginalPrice; // Legacy field
+      
+      console.log('💰 Updating product with EXACT profitMarginPrice:', {
+        userProvidedPrice: userProfitMarginPrice,
+        finalPrice: product.profitMarginPrice,
+        basePrice: finalBasePrice,
+        profitMarginPercentage: finalProfitMarginPercentage,
+        discountPercentage: finalDiscountPercentage
+      });
+    } else if (basePrice !== undefined) {
+      // Fallback to calculated pricing from basePrice
       const finalBasePrice = parseFloat(basePrice);
       const finalProfitMarginPercentage = parseFloat(profitMarginPercentage) || product.profitMarginPercentage;
       const finalDiscountPercentage = parseFloat(discountPercentage) || product.discountPercentage;
       
       if (finalBasePrice > 0) {
         product.updatePricing(finalBasePrice, finalProfitMarginPercentage, finalDiscountPercentage);
+        // Apply consistent rounding
+        product.profitMarginPrice = round2(product.profitMarginPrice);
+        product.calculatedOriginalPrice = round2(product.calculatedOriginalPrice);
+        product.offerPrice = round2(product.offerPrice);
+        product.price = round2(product.price);
+        
+        console.log('💰 Updating product with calculated pricing from basePrice:', {
+          basePrice: finalBasePrice,
+          profitMarginPercentage: finalProfitMarginPercentage,
+          discountPercentage: finalDiscountPercentage
+        });
       }
     }
     

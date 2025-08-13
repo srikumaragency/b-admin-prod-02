@@ -47,11 +47,11 @@ const orderItemSchema = new mongoose.Schema({
     },
     profitMarginPercentage: {
       type: Number,
-      default: 65
+      default: 70
     },
     discountPercentage: {
       type: Number,
-      default: 81
+      default: 80
     },
     calculatedOriginalPrice: {
       type: Number,
