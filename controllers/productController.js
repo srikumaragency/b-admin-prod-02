@@ -195,9 +195,9 @@ exports.createProduct = async (req, res) => {
       name,
       description,
       // New pricing fields
-      basePrice: finalBasePrice,
-      profitMarginPercentage: finalProfitMarginPercentage,
-      discountPercentage: finalDiscountPercentage,
+      basePrice: pricingDetails.basePrice,
+      profitMarginPercentage: pricingDetails.profitMarginPercentage,
+      discountPercentage: pricingDetails.discountPercentage,
       profitMarginPrice: pricingDetails.profitMarginPrice,
       calculatedOriginalPrice: pricingDetails.calculatedOriginalPrice,
       offerPrice: pricingDetails.offerPrice,
