@@ -185,12 +185,16 @@ const updatePaymentStatus = async (req, res) => {
       });
     }
 
-    // Only allow payment status update if screenshot is uploaded (except for failed/refunded)
-    if (paymentStatus === 'paid' && !order.paymentDetails?.paymentScreenshot) {
-      return res.status(400).json({
-        success: false,
-        message: 'Payment screenshot is required before marking as paid'
-      });
+    // Relaxed rule: allow marking as paid without screenshot IF adminNotes are provided
+    if (paymentStatus === 'paid') {
+      const hasScreenshot = !!(order.paymentDetails && order.paymentDetails.paymentScreenshot);
+      const hasNotes = !!(adminNotes && adminNotes.trim());
+      if (!hasScreenshot && !hasNotes) {
+        return res.status(400).json({
+          success: false,
+          message: 'Admin notes are required if marking as paid without a payment screenshot'
+        });
+      }
     }
 
     const previousPaymentStatus = order.paymentStatus;
@@ -250,6 +254,36 @@ const updatePaymentStatus = async (req, res) => {
       });
     }
 
+    // If transitioned to paid just now, ensure invoice meta exists
+    let invoiceDataResponse = null;
+    if (paymentStatus === 'paid' && previousPaymentStatus !== 'paid') {
+      try {
+        const refreshed = await ordersCollection.findOne(
+          { orderId: orderId },
+          { maxTimeMS: 5000 }
+        );
+        if (refreshed && !(refreshed.invoice && refreshed.invoice.invoiceNumber)) {
+          const invoiceNumber = generateInvoiceNumber(orderId);
+          const inv = {
+            invoiceNumber,
+            generatedAt: new Date(),
+            generatedBy: req.user?.email || 'admin',
+            invoiceUrl: `/api/orders/${orderId}/invoice`
+          };
+          await ordersCollection.updateOne(
+            { orderId: orderId },
+            { $set: { invoice: inv } },
+            { maxTimeMS: 5000 }
+          );
+          invoiceDataResponse = inv;
+        } else if (refreshed && refreshed.invoice) {
+          invoiceDataResponse = refreshed.invoice;
+        }
+      } catch (e) {
+        console.warn('Invoice metadata creation after payment failed (will still return 200):', e.message);
+      }
+    }
+
     res.json({
       success: true,
       message: `Payment status updated successfully${paymentStatus === 'paid' && previousPaymentStatus !== 'paid' ? '. Order status automatically changed to confirmed.' : ''}`,
@@ -259,7 +293,8 @@ const updatePaymentStatus = async (req, res) => {
         orderStatus: updateData.orderStatus || order.orderStatus,
         adminNotes: adminNotes || order.adminNotes,
         adminReviewedAt: updateData['paymentDetails.adminReviewedAt'],
-        updatedAt: updateData.updatedAt
+        updatedAt: updateData.updatedAt,
+        invoice: invoiceDataResponse || undefined
       }
     });
 
@@ -973,7 +1008,8 @@ const getInvoicePDF = async (req, res) => {
       orderSummary: order.orderSummary,
       paymentStatus: order.paymentStatus,
       generatedAt: order.invoice.generatedAt,
-      storeDetails
+      storeDetails,
+      docType: 'invoice'
     };
 
     if (format === 'json') {
@@ -1703,6 +1739,81 @@ const debugInvoice = async (req, res) => {
   }
 };
 
+// Generate estimate (quotation) before payment
+const getEstimatePDF = async (req, res) => {
+  let order = null;
+  try {
+    const { orderId } = req.params;
+    const { phone } = req.query;
+    const mongoose = require('mongoose');
+    const db = mongoose.connection.db;
+    const ordersCollection = db.collection('orders');
+
+    // Build query - if phone is provided (public access), verify phone number
+    let query = { orderId };
+    if (phone) {
+      query['customerDetails.mobile'] = phone;
+    }
+
+    try {
+      order = await ordersCollection.findOne(query, { maxTimeMS: 8000 });
+    } catch (err) {
+      return res.status(408).json({ success: false, message: 'Database timeout while fetching order', error: 'TIMEOUT_ERROR' });
+    }
+
+    if (!order) {
+      const message = phone ? 'Order not found or phone number does not match' : 'Order not found';
+      return res.status(404).json({ success: false, message });
+    }
+
+    // Only allow estimate download for unpaid orders
+    if (order.paymentStatus === 'paid') {
+      return res.status(400).json({
+        success: false,
+        message: 'This order is already paid. Please download the invoice instead.'
+      });
+    }
+
+    // Get store details (best effort)
+    let store = null;
+    try {
+      store = await db.collection('stores').findOne({}, { maxTimeMS: 3000 });
+    } catch (e) { /* ignore */ }
+
+    const storeDetails = {
+      logo: store?.logo?.url || null,
+      name: store?.name || 'OMS Agency',
+      address: store?.address || {},
+      phone: store?.phone || '+91 9942494345',
+      email: store?.email || 'osppsivakasi@gmail.com'
+    };
+
+    // For estimates, don't use invoice number
+    const invoiceData = {
+      invoiceNumber: '', // No invoice number for estimates
+      orderId: order.orderId,
+      customerDetails: order.customerDetails,
+      items: order.items,
+      orderSummary: order.orderSummary,
+      paymentStatus: order.paymentStatus,
+      generatedAt: new Date(),
+      generatedBy: 'Admin System',
+      storeDetails,
+      docType: 'estimate' // Explicitly set as estimate
+    };
+
+    const pdfBuffer = await generateProfessionalInvoicePDF(invoiceData);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    const filename = `estimate_${orderId.replace(/[^a-zA-Z0-9]/g, '')}.pdf`;
+    res.setHeader('Content-Disposition', `attachment; filename=${filename}; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    res.end(pdfBuffer);
+  } catch (error) {
+    console.error('Error generating estimate PDF:', error);
+    return res.status(500).json({ success: false, message: 'Failed to generate estimate PDF', error: error.message });
+  }
+};
+
 module.exports = {
   getAllOrders,
   getOrderById,
@@ -1724,5 +1835,6 @@ module.exports = {
   uploadPaymentScreenshot,
   getStates,
   getDistricts,
-  createOrder
+  createOrder,
+  getEstimatePDF
 };

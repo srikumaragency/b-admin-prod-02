@@ -247,7 +247,26 @@ const orderSchema = new mongoose.Schema({
       default: null
     }
   },
-  // Invoice details
+  // Estimate details (for unpaid orders)
+  estimate: {
+    estimateNumber: {
+      type: String,
+      default: null
+    },
+    estimateUrl: {
+      type: String, // PDF URL
+      default: null
+    },
+    generatedAt: {
+      type: Date,
+      default: null
+    },
+    generatedBy: {
+      type: String,
+      default: 'system'
+    }
+  },
+  // Invoice details (for paid orders)
   invoice: {
     invoiceNumber: {
       type: String,
@@ -318,9 +337,17 @@ orderSchema.pre('save', async function(next) {
     this.orderId = `ORD${timestamp}${random}`;
   }
   
-
+  // Generate estimate number when order is first created (if not already set)
+  if (this.isNew && !this.estimate?.estimateNumber) {
+    try {
+      await this.generateEstimate();
+      console.log(`✅ Estimate generated for new order: ${this.orderId}`);
+    } catch (error) {
+      console.error(`❌ Failed to generate estimate for ${this.orderId}:`, error);
+    }
+  }
   
-  // Also auto-calculate profit when payment status changes to 'paid' (recalculate if needed)
+  // Generate invoice when payment status changes to 'paid'
   if (this.isModified('paymentStatus') && this.paymentStatus === 'paid') {
     try {
       // Generate invoice when payment is confirmed
@@ -336,10 +363,26 @@ orderSchema.pre('save', async function(next) {
   next();
 });
 
-// Method to generate invoice
+// Method to generate estimate (for unpaid orders)
+orderSchema.methods.generateEstimate = async function() {
+  const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const estimateNumber = `EST-${timestamp}-${this.orderId.replace('ORD-', '')}`;
+  
+  // Update estimate data
+  this.estimate = {
+    estimateNumber: estimateNumber,
+    estimateUrl: null, // Will be updated after PDF generation
+    generatedAt: new Date(),
+    generatedBy: 'system'
+  };
+  
+  return this;
+};
+
+// Method to generate invoice (for paid orders)
 orderSchema.methods.generateInvoice = async function() {
   const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const invoiceNumber = `INV-${timestamp}-${this.orderId}`;
+  const invoiceNumber = `INV-${timestamp}-${this.orderId.replace('ORD-', '')}`;
   
   // Update invoice data
   this.invoice = {
@@ -349,7 +392,7 @@ orderSchema.methods.generateInvoice = async function() {
     generatedBy: 'system'
   };
   
-  return this.save();
+  return this;
 };
 
 

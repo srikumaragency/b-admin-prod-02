@@ -179,7 +179,10 @@ router.get('/test', async (req, res) => {
 // Customer tracking route (no auth required, but phone number verification)
 router.get('/track/:orderId', orderController.getOrderForTracking);
 
-// Apply auth middleware to all other routes except test and tracking
+// Public estimate download (no auth required, but phone number verification)
+router.get('/:orderId/estimate', orderController.getEstimatePDF);
+
+// Apply auth middleware to all other routes except test, tracking, and public estimate
 router.use(authMiddleware);
 
 // Order management routes

@@ -113,15 +113,16 @@ const generateProfessionalInvoicePDF = (invoiceData) => {
       console.log('Starting professional invoice PDF generation...');
       
       // Create PDF document with A4 standard settings
+      const docType = (invoiceData && invoiceData.docType) || 'invoice';
       const doc = new PDFDocument({
         size: 'A4',
         margin: 15,
         bufferPages: true,
         info: {
-          Title: `Invoice ${invoiceData.invoiceNumber}`,
+          Title: `${docType === 'estimate' ? 'Estimate' : 'Invoice'} ${invoiceData.invoiceNumber}`,
           Author: 'Omshanmukapyropark Crackers',
-          Subject: 'Invoice',
-          Keywords: 'invoice, crackers, fireworks, sivakaasi'
+          Subject: docType === 'estimate' ? 'Estimate' : 'Invoice',
+          Keywords: docType === 'estimate' ? 'estimate, quotation, crackers, fireworks, sivakaasi' : 'invoice, crackers, fireworks, sivakaasi'
         }
       });
       
@@ -185,7 +186,8 @@ const generateProfessionalInvoicePDF = (invoiceData) => {
         if (isFirstPage) {
           // MAIN BORDER - Optimized height to fit everything on one page
           const mainBorderY = 15;
-          const mainBorderHeight = totalPages === 1 ? 750 : 810; // Balanced height for single page with footer
+          // Use consistent border height across pages to keep footer placement identical
+          const mainBorderHeight = 750;
           doc.rect(leftMargin, mainBorderY, pageWidth, mainBorderHeight).stroke('#000000');
           
           // HEADER SECTION (no separate border - part of main border)
@@ -373,11 +375,12 @@ const generateProfessionalInvoicePDF = (invoiceData) => {
           // Reset Y to start position for right side
           let invoiceY = startY;
           
+          const docLabel = docType === 'estimate' ? 'Estimate No :' : 'Invoice No :';
           doc.font('Helvetica')
              .fontSize(11)
-             .text('Invoice No :', invoiceStartX, invoiceY);
+             .text(docLabel, invoiceStartX, invoiceY);
           doc.font('Helvetica-Bold')
-             .text(invoiceNumber, invoiceValueX, invoiceY);
+             .text(docType === 'estimate' ? '' : invoiceNumber, invoiceValueX, invoiceY);
           
           invoiceY += 15;
           
@@ -386,6 +389,11 @@ const generateProfessionalInvoicePDF = (invoiceData) => {
              .text('Date :', invoiceStartX, invoiceY);
           doc.font('Helvetica-Bold')
              .text(formatDate(generatedAt), invoiceValueX, invoiceY);
+
+          // Page X of Y on first page too
+          invoiceY += 15;
+          doc.font('Helvetica').fontSize(10)
+             .text(`Page ${currentPage} of ${totalPages}`, invoiceStartX, invoiceY);
 
           // Calculate the maximum Y position from both sides
           const maxY = Math.max(currentY + 20, invoiceY + 20);
@@ -398,21 +406,146 @@ const generateProfessionalInvoicePDF = (invoiceData) => {
           doc.moveTo(leftMargin, y).lineTo(rightMargin, y).stroke('#000000');
           
         } else {
-          // CONTINUATION PAGE HEADER - Always full height border
-          doc.rect(leftMargin, 15, pageWidth, 810).stroke('#000000');
+          // CONTINUATION PAGE HEADER - Same as page 1 (repeat all header details)
+          const mainBorderY = 15;
+          const mainBorderHeight = 750;
+          doc.rect(leftMargin, mainBorderY, pageWidth, mainBorderHeight).stroke('#000000');
+
+          // HEADER SECTION
           y = 25;
-          
           doc.fillColor('#000000')
-             .fontSize(16)
+             .fontSize(18)
              .font('Helvetica-Bold')
              .text('OMSHANMUKAPYROPARK CRACKERS', leftMargin + 10, y, { align: 'center', width: pageWidth - 20 });
-          
+
           y += 25;
-          doc.fontSize(10)
-             .font('Helvetica-Oblique')
-             .text(`Invoice ${invoiceNumber} - Page ${currentPage} of ${totalPages}`, leftMargin + 10, y, { align: 'center', width: pageWidth - 20 });
+          doc.fontSize(12)
+             .font('Helvetica')
+             .text('www.omshanmukapyropark.com', leftMargin + 10, y, { align: 'center', width: pageWidth - 20 });
+
+          y += 20;
+
+          // CONTACT ROW - Internal horizontal line only
+          doc.moveTo(leftMargin, y).lineTo(rightMargin, y).stroke('#000000');
+          y += 8;
           
-          y += 30;
+          doc.fillColor('#000000')
+             .fontSize(11)
+             .font('Helvetica-Bold')
+             .text('WhatsApp: +91 9942494345', leftMargin + 15, y);
+          
+          // Email aligned to the right
+          doc.text('Email: osppsivakasi@gmail.com', leftMargin + 15, y, {
+            align: 'right',
+            width: pageWidth - 30
+          });
+
+          y += 20;
+
+          // Another horizontal line
+          doc.moveTo(leftMargin, y).lineTo(rightMargin, y).stroke('#000000');
+          const topBorderY = y;
+          y += 5;
+
+          // Start Y for left/right sections
+          const startY = y;
+
+          // LEFT: CUSTOMER DETAILS (repeat on every page)
+          let customerName = customerDetails.name || 'Customer Name';
+
+          let addressLine1 = '';
+          let addressLine2 = '';
+          if (customerDetails.address) {
+            const addr = customerDetails.address;
+            const streetParts = [];
+            if (addr.street) streetParts.push(addr.street);
+            if (addr.landmark) streetParts.push(addr.landmark);
+            if (addr.nearestTown) streetParts.push(addr.nearestTown);
+
+            const adminParts = [];
+            if (addr.district) adminParts.push(addr.district);
+            if (addr.state) adminParts.push(addr.state);
+            if (addr.pincode) adminParts.push(addr.pincode);
+            if (addr.country && addr.country !== 'India') adminParts.push(addr.country);
+
+            if (streetParts.length > 0) addressLine1 = streetParts.join(', ');
+            if (adminParts.length > 0) addressLine2 = adminParts.join(', ');
+            if (!addressLine1 && !addressLine2) addressLine1 = 'Customer Address';
+          } else {
+            addressLine1 = 'Customer Address';
+          }
+
+          let customerContact = 'Contact Number';
+          const mobile = customerDetails.mobile;
+          const deliveryContact = customerDetails.deliveryContact;
+          if (mobile && deliveryContact && mobile !== deliveryContact) customerContact = `${mobile}, ${deliveryContact}`;
+          else if (mobile) customerContact = mobile;
+          else if (deliveryContact) customerContact = deliveryContact;
+
+          const discountColumnX = leftMargin + 35 + 50 + 120 + 50 + 50 + 60;
+          const customerSectionWidth = discountColumnX - leftMargin - 20;
+          const labelWidth = 50;
+          const customerValueX = leftMargin + 10 + labelWidth;
+          let currentY = startY;
+
+          doc.fontSize(11).font('Helvetica').fillColor('#000000').text('Name:', leftMargin + 10, currentY);
+          doc.font('Helvetica-Bold').text(customerName, customerValueX, currentY, { width: customerSectionWidth - labelWidth - 10 });
+
+          currentY += 15;
+
+          doc.font('Helvetica').fontSize(11).text('Address:', leftMargin + 10, currentY);
+          const addressWidth = customerSectionWidth - labelWidth - 10;
+          doc.font('Helvetica').fontSize(10);
+          const line1Width = doc.widthOfString(addressLine1);
+          if (line1Width > addressWidth && addressLine1.length > 0) {
+            const words = addressLine1.split(' ');
+            let fittingText = '';
+            let remainingText = '';
+            for (let i = 0; i < words.length; i++) {
+              const testText = fittingText + (fittingText ? ' ' : '') + words[i];
+              if (doc.widthOfString(testText) <= addressWidth) fittingText = testText;
+              else { remainingText = words.slice(i).join(' '); break; }
+            }
+            doc.text(fittingText, customerValueX, currentY, { width: addressWidth });
+            currentY += 12;
+            if (remainingText && addressLine2) doc.text(remainingText + ', ' + addressLine2, customerValueX, currentY, { width: addressWidth });
+            else if (remainingText) doc.text(remainingText, customerValueX, currentY, { width: addressWidth });
+            else if (addressLine2) doc.text(addressLine2, customerValueX, currentY, { width: addressWidth });
+          } else {
+            doc.text(addressLine1, customerValueX, currentY, { width: addressWidth });
+            if (addressLine2) { currentY += 12; doc.text(addressLine2, customerValueX, currentY, { width: addressWidth }); }
+          }
+
+          currentY += 15;
+
+          doc.font('Helvetica').fontSize(11).text('Contact:', leftMargin + 10, currentY);
+          doc.font('Helvetica').fontSize(10).text(customerContact, customerValueX, currentY, { width: customerSectionWidth - labelWidth - 10 });
+
+          // RIGHT: INVOICE INFO (repeat on every page)
+          const invoiceStartX = discountColumnX + 8;
+          const invoiceLabelWidth = 60;
+          const invoiceValueX = invoiceStartX + invoiceLabelWidth;
+          let invoiceY = startY;
+
+          const docLabel = docType === 'estimate' ? 'Estimate No :' : 'Invoice No :';
+          doc.font('Helvetica').fontSize(11).text(docLabel, invoiceStartX, invoiceY);
+          doc.font('Helvetica-Bold').text(docType === 'estimate' ? '' : invoiceNumber, invoiceValueX, invoiceY);
+
+          invoiceY += 15;
+
+          doc.font('Helvetica').fontSize(11).text('Date :', invoiceStartX, invoiceY);
+          doc.font('Helvetica-Bold').text(formatDate(generatedAt), invoiceValueX, invoiceY);
+
+          // PAGE X OF Y under invoice info
+          invoiceY += 15;
+          doc.font('Helvetica').fontSize(10)
+             .text(`Page ${currentPage} of ${totalPages}`, invoiceStartX, invoiceY);
+
+          const maxY = Math.max(currentY + 20, invoiceY + 20);
+          y = maxY;
+
+          doc.moveTo(discountColumnX, topBorderY).lineTo(discountColumnX, y).stroke('#000000');
+          doc.moveTo(leftMargin, y).lineTo(rightMargin, y).stroke('#000000');
         }
       };
 
@@ -707,7 +840,8 @@ const generateProfessionalInvoicePDF = (invoiceData) => {
       
       // Calculate the bottom border position
       const mainBorderY = 15;
-      const mainBorderHeight = totalPages === 1 ? 750 : 810;
+      // Keep bottom border constant so footer aligns exactly same across pages
+      const mainBorderHeight = 750;
       const bottomBorderY = mainBorderY + mainBorderHeight;
       
       // Draw vertical divider through summary rows and extend to bottom border

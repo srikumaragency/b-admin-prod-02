@@ -295,3 +295,170 @@ exports.resetQuickShoppingOrder = async (req, res) => {
     });
   }
 };
+
+// Remap quick shopping order using simple SNo mapping
+// Accepts mappings for categories and/or products and applies globally
+exports.remapQuickShoppingOrder = async (req, res) => {
+  try {
+    console.log('Remapping quick shopping order for admin:', req.admin?._id);
+
+    if (!req.admin) {
+      return res.status(401).json({
+        success: false,
+        message: 'Admin authentication required'
+      });
+    }
+
+    const adminId = req.admin._id;
+    const branch = req.admin.branch;
+
+    const {
+      categoryMapping,          // e.g., { "1": 10, "2": 1 }
+      productMapping,           // GLOBAL product mapping: { "1": 10, "2": 1 }
+      productMappingByCategory, // PER-CATEGORY mapping: { "<categoryId>": { "1": 10, "2": 1 } }
+      keepUnmapped = true,
+      sortAfterRemap = true
+    } = req.body || {};
+
+    if (!categoryMapping && !productMapping && !productMappingByCategory) {
+      return res.status(400).json({
+        success: false,
+        message: 'Provide at least one mapping: categoryMapping, productMapping, or productMappingByCategory'
+      });
+    }
+
+    // Helper to normalize mapping keys to numbers
+    const normalizeMap = (map) => {
+      if (!map) return null;
+      const out = {};
+      for (const [k, v] of Object.entries(map)) {
+        if (v === undefined || v === null || v === '') continue;
+        const nk = Number(k);
+        const nv = Number(v);
+        if (Number.isFinite(nk) && Number.isFinite(nv)) out[nk] = nv;
+      }
+      return out;
+    };
+
+    const cMap = normalizeMap(categoryMapping);
+    const pMap = normalizeMap(productMapping);
+
+    // Normalize per-category product mappings
+    const pMapByCat = {};
+    if (productMappingByCategory && typeof productMappingByCategory === 'object') {
+      for (const [catId, mapping] of Object.entries(productMappingByCategory)) {
+        pMapByCat[catId] = normalizeMap(mapping);
+      }
+    }
+
+    // Load existing order or build default from current categories/products
+    let quickShopping = await QuickShopping.findOne({ adminId }).lean();
+
+    if (!quickShopping) {
+      console.log('No custom order found. Building default order from categories/products...');
+      const categories = await Category.find().sort({ name: 1 }).lean();
+      const categoryOrder = [];
+      let cIndex = 1;
+      for (const category of categories) {
+        const products = await Product.find({
+          categoryId: category._id,
+          $and: [
+            {
+              $or: [
+                { isDeleted: { $exists: false } },
+                { isDeleted: false },
+                { isDeleted: null }
+              ]
+            },
+            {
+              $or: [
+                { isActive: { $exists: false } },
+                { isActive: true },
+                { isActive: null }
+              ]
+            }
+          ]
+        })
+        .select('_id name')
+        .sort({ name: 1 })
+        .lean();
+
+        const mappedProducts = products.map((p, idx) => ({
+          productId: p._id,
+          serialNumber: idx + 1
+        }));
+
+        categoryOrder.push({
+          categoryId: category._id,
+          serialNumber: cIndex++,
+          products: mappedProducts
+        });
+      }
+
+      quickShopping = { adminId, branch, categoryOrder };
+    }
+
+    // Apply mappings
+    const applyMap = (oldSN, map) => {
+      if (!map) return oldSN;
+      const mapped = map[Number(oldSN)];
+      if (mapped === 0) return 0; // allow zero if explicitly set
+      return mapped != null ? Number(mapped) : (keepUnmapped ? oldSN : oldSN);
+    };
+
+    // Validate uniqueness helper
+    const ensureUnique = (arr, what) => {
+      const set = new Set();
+      for (const n of arr) {
+        if (!Number.isFinite(n)) return `${what} has non-numeric SNo`;
+        if (set.has(n)) return `${what} has duplicate SNo: ${n}`;
+        set.add(n);
+      }
+      return null;
+    };
+
+    // Remap category serial numbers
+    const categorySNs = quickShopping.categoryOrder.map(c => applyMap(c.serialNumber, cMap));
+    const categoryErr = ensureUnique(categorySNs, 'Category order');
+    if (categoryErr) {
+      return res.status(400).json({ success: false, message: categoryErr });
+    }
+
+    quickShopping.categoryOrder = quickShopping.categoryOrder.map((c, i) => ({
+      ...c,
+      serialNumber: categorySNs[i],
+      products: c.products?.length ? (() => {
+        const mapForThisCategory = pMapByCat[c.categoryId?.toString?.() || c.categoryId] || pMap;
+        const productSNs = c.products.map(p => applyMap(p.serialNumber, mapForThisCategory));
+        const productErr = ensureUnique(productSNs, `Products in category ${c.categoryId}`);
+        if (productErr) throw new Error(productErr);
+        const remapped = c.products.map((p, idx) => ({ ...p, serialNumber: productSNs[idx] }));
+        return sortAfterRemap ? remapped.sort((a, b) => a.serialNumber - b.serialNumber) : remapped;
+      })() : []
+    }));
+
+    if (sortAfterRemap) {
+      quickShopping.categoryOrder.sort((a, b) => a.serialNumber - b.serialNumber);
+    }
+
+    // Persist the result
+    const saved = await QuickShopping.findOneAndUpdate(
+      { adminId },
+      { adminId, branch, categoryOrder: quickShopping.categoryOrder },
+      { new: true, upsert: true }
+    ).populate({ path: 'categoryOrder.categoryId', select: 'name' })
+     .populate({ path: 'categoryOrder.products.productId', select: 'name productCode price offerPrice images basePrice profitMarginPrice' });
+
+    res.json({
+      success: true,
+      message: 'Quick shopping order remapped successfully',
+      data: saved.categoryOrder
+    });
+  } catch (error) {
+    console.error('Error remapping quick shopping order:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Error remapping quick shopping order'
+    });
+  }
+};

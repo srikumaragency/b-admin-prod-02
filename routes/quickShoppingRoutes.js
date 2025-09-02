@@ -15,6 +15,9 @@ router.get('/order', quickShoppingController.getQuickShoppingOrder);
 // Save quick shopping order
 router.post('/order', quickShoppingController.saveQuickShoppingOrder);
 
+// Remap quick shopping order (simple SNo mapping)
+router.post('/order/remap', quickShoppingController.remapQuickShoppingOrder);
+
 // Reset quick shopping order
 router.delete('/order', quickShoppingController.resetQuickShoppingOrder);
 
